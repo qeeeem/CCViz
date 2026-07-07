@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude Code Flight Recorder</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app" v-cloak>
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">LOCAL CLAUDE CODE TELEMETRY / SANITIZED</div>
+          <h1>AI 工作室飞行记录仪</h1>
+          <p class="subtitle">
+            23 次项目会话，成本、token、缓存、代码变动和等待时间可视化。
+          </p>
+        </div>
+        <div class="top-actions">
+          <button class="icon-button" title="数据来源：.claude.json" aria-label="数据来源">
+            <i data-lucide="database"></i>
+          </button>
+          <button class="icon-button" title="已隐藏邮箱、账号和原始路径" aria-label="隐私说明">
+            <i data-lucide="shield-check"></i>
+          </button>
+        </div>
+      </header>
+
+      <main class="shell">
+        <section class="stats-grid">
+          <article class="stat-card" v-for="item in headlineStats" :key="item.label">
+            <div class="stat-icon" :class="item.class"><i :data-lucide="item.icon"></i></div>
+            <div>
+              <p>{{ item.label }}</p>
+              <strong>{{ item.value }}</strong>
+              <span>{{ item.note }}</span>
+            </div>
+          </article>
+        </section>
+
+        <section class="command-strip">
+          <div class="strip-copy">
+            <span>记忆点</span>
+            <strong>一次 AI 生成视频会话吞掉了 {{ videoCostShare }}% 的总成本。</strong>
+          </div>
+          <div class="strip-meter" aria-label="AI 生成视频成本占比">
+            <div :style="{ width: videoCostShare + '%' }"></div>
+          </div>
+        </section>
+
+        <section class="dashboard-grid">
+          <article class="panel panel-wide">
+            <div class="panel-header">
+              <div>
+                <p>Project Orbit</p>
+                <h2>项目能耗轨道</h2>
+              </div>
+              <div class="segmented">
+                <button
+                  v-for="metric in orbitMetrics"
+                  :key="metric.key"
+                  :class="{ active: selectedMetric === metric.key }"
+                  @click="selectedMetric = metric.key"
+                >
+                  {{ metric.label }}
+                </button>
+              </div>
+            </div>
+            <div id="orbitChart" class="chart tall"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p>Cost vs Output</p>
+                <h2>花钱和产出不总是同向</h2>
+              </div>
+            </div>
+            <div id="scatterChart" class="chart"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p>Code Churn</p>
+                <h2>真正动手改了多少</h2>
+              </div>
+            </div>
+            <div id="churnChart" class="chart"></div>
+          </article>
+
+          <article class="panel model-panel">
+            <div class="panel-header">
+              <div>
+                <p>Model Mix</p>
+                <h2>模型阵营</h2>
+              </div>
+            </div>
+            <div id="modelChart" class="chart small"></div>
+            <div class="model-list">
+              <div v-for="row in modelMix" :key="row.name">
+                <span :style="{ background: row.color }"></span>
+                <p>{{ row.name }}</p>
+                <strong>{{ row.count }}</strong>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p>Cache Gravity</p>
+                <h2>缓存读取像暗物质</h2>
+              </div>
+            </div>
+            <div class="cache-block">
+              <strong>{{ formatCompact(totalCacheRead) }}</strong>
+              <span>cache read tokens</span>
+              <p>
+                缓存读取是输入 token 的 {{ cacheMultiplier }} 倍，说明这些会话很依赖上下文复用。
+              </p>
+            </div>
+          </article>
+
+          <article class="panel panel-wide">
+            <div class="panel-header">
+              <div>
+                <p>Leaderboard</p>
+                <h2>黑匣子记录 Top 8</h2>
+              </div>
+              <div class="search-box">
+                <i data-lucide="search"></i>
+                <input v-model="query" type="search" placeholder="筛项目名" />
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>项目</th>
+                    <th>成本</th>
+                    <th>输入</th>
+                    <th>输出</th>
+                    <th>代码变动</th>
+                    <th>Web</th>
+                    <th>主阵营</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="project in filteredProjects.slice(0, 8)" :key="project.name + project.cost">
+                    <td>
+                      <span class="rank-dot" :style="{ background: project.color }"></span>
+                      {{ project.name }}
+                    </td>
+                    <td>${{ project.cost.toFixed(2) }}</td>
+                    <td>{{ formatCompact(project.input) }}</td>
+                    <td>{{ formatCompact(project.output) }}</td>
+                    <td>{{ project.added + project.removed }}</td>
+                    <td>{{ project.web }}</td>
+                    <td><span class="pill">{{ project.family }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p>Interface Echo</p>
+                <h2>被反复提醒的能力</h2>
+              </div>
+            </div>
+            <div class="tip-list">
+              <div v-for="tip in topTips" :key="tip.name">
+                <span>{{ tip.name }}</span>
+                <div><i :style="{ width: tip.percent + '%' }"></i></div>
+                <strong>{{ tip.count }}</strong>
+              </div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <noscript>这个可视化页面需要启用 JavaScript。</noscript>
+    <script src="./app.js"></script>
+  </body>
+</html>
